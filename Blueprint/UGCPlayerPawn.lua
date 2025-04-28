@@ -1,0 +1,226 @@
+---@class UGCPlayerPawn_C:BP_UGCPlayerPawn_C
+--Edit Below--
+local UGCPlayerPawn = 
+{
+    GrounpID                  = 0,                         -- 队伍ID，服务端与客户端的交互，由PlayerState实现，编辑器设置不再起作用 PlayerState
+    PlayerIndex               = 0,                         -- 玩家序列号 0 1 2 3
+    GoldCoin                  = 0,                         -- 金币
+    CusBloodColor             = 0,                         -- 自定义飘血，0屏蔽，1开启，2使用默认
+    DropItemTable           = {},                         -- 从空投箱获取倒地护具及道具，下回合用新的
+    CurrentWeaponLevel        = 1,                         -- 当前武器等级
+    bInitializedWeapon        = false                      -- 是否已初始化武器
+};
+
+-- 全局武器系统，确保数据一致性
+if not _G.GunGameWeaponSystem then
+    _G.GunGameWeaponSystem = {
+        WeaponLevels = {
+            { 
+                WeaponID = 101001, 
+                Name = "AKM突击步枪",
+            },
+            { 
+                WeaponID = 101002, 
+                Name = "M16A4突击步枪",
+            },
+            { 
+                WeaponID = 101003, 
+                Name = "SCAR-L突击步枪",
+            },
+            { 
+                WeaponID = 101004, 
+                Name = "M416突击步枪",
+            },
+            { 
+                WeaponID = 101005, 
+                Name = "GROZA突击步枪",
+            }
+        },
+        PlayerLevels = {}  -- 记录玩家等级，key是playerKey
+    }
+end
+
+-- 使用全局变量
+local WeaponSystem = _G.GunGameWeaponSystem
+
+function UGCPlayerPawn:GetReplicatedProperties()
+    return
+    "GrounpID",
+    "PlayerIndex",
+    "GoldCoin",
+    "CusBloodColor",
+    "DropItemTable",
+    "CurrentWeaponLevel",
+    "bInitializedWeapon"
+end
+
+function UGCPlayerPawn:ReceiveBeginPlay()
+    ugcprint("[UGCPlayerPawn] ReceiveBeginPlay")
+    self.SuperClass.ReceiveBeginPlay(self)
+    self.OnCharacterHpChange:Add(self.OnHealthChanged, self)
+    
+    -- 只在服务器上处理武器逻辑
+    if self:HasAuthority() then
+        local initDelegate = ObjectExtend.CreateDelegate(self, function()
+            local playerKey = UGCGameSystem.GetPlayerKeyByPlayerPawn(self)
+            if not playerKey then
+                ObjectExtend.DestroyDelegate(initDelegate)
+                return
+            end
+            
+            -- 如果已经初始化过，直接返回
+            if self.bInitializedWeapon then
+                ObjectExtend.DestroyDelegate(initDelegate)
+                return
+            end
+            
+            -- 检查是否是复活后的情况
+            if WeaponSystem.PlayerLevels[playerKey] then
+                self.CurrentWeaponLevel = WeaponSystem.PlayerLevels[playerKey]
+                ugcprint("[Debug] 复活后恢复武器等级: " .. self.CurrentWeaponLevel)
+            else
+                -- 首次初始化
+                self.CurrentWeaponLevel = 1
+                WeaponSystem.PlayerLevels[playerKey] = 1
+                ugcprint("[Debug] 首次初始化武器等级: " .. self.CurrentWeaponLevel)
+            end
+            
+            -- 清空背包
+            local BackPackInfo = UGCBackPackSystem.GetAllItemData(self)
+            for k, v in pairs(BackPackInfo) do
+                UGCBackPackSystem.DropItem(self, v.ItemID, v.Count, true)
+            end
+            
+            -- 添加武器
+            local weapon = WeaponSystem.WeaponLevels[self.CurrentWeaponLevel]
+            if weapon then
+                ugcprint("[Debug] 给予武器: " .. weapon.Name .. " (ID: " .. weapon.WeaponID .. ")")
+                UGCBackPackSystem.AddItem(self, weapon.WeaponID, 1)
+                UGCBackPackSystem.AddItem(self, 105001, 180) -- 添加子弹
+            end
+            
+            -- 标记为已初始化
+            self.bInitializedWeapon = true
+            
+            ObjectExtend.DestroyDelegate(initDelegate)
+        end)
+        
+        -- 延迟初始化
+        KismetSystemLibrary.K2_SetTimerDelegateForLua(initDelegate, self, 0.5, false)
+    else
+        ugcprint("[Debug] 非服务器环境，跳过初始化")
+    end
+end
+
+-- 处理玩家死亡事件
+function UGCPlayerPawn:UGC_PlayerDeadEvent(Killer, DamageType)
+    if not self:HasAuthority() then return end
+    
+    -- 获取玩家标识
+    local playerKey = UGCGameSystem.GetPlayerKeyByPlayerPawn(self)
+    if not playerKey then return end
+    
+    ugcprint("[Debug] 玩家死亡: " .. playerKey)
+    
+    -- 获取击杀者信息
+    local killerKey = nil
+    local killerController = nil
+    local killerPawn = nil
+    
+    if Killer and UE.IsValid(Killer) then
+        killerController = Killer
+        killerKey = UGCGameSystem.GetPlayerKeyByPlayerController(killerController)
+        
+        if killerKey then
+            killerPawn = UGCGameSystem.GetPlayerPawnByPlayerKey(killerKey)
+            ugcprint("[Debug] 击杀者: " .. killerKey)
+        end
+    end
+    
+    -- 处理击杀者武器升级
+    if killerPawn and killerKey and killerKey ~= playerKey then
+        -- 增加击杀者武器等级
+        local oldLevel = killerPawn.CurrentWeaponLevel
+        killerPawn.CurrentWeaponLevel = math.min(killerPawn.CurrentWeaponLevel + 1, #WeaponSystem.WeaponLevels)
+        
+        -- 更新全局记录
+        WeaponSystem.PlayerLevels[killerKey] = killerPawn.CurrentWeaponLevel
+        
+        ugcprint("[Debug] 击杀者武器等级: " .. oldLevel .. " -> " .. killerPawn.CurrentWeaponLevel)
+        
+        if oldLevel ~= killerPawn.CurrentWeaponLevel then
+            -- 先清空击杀者背包
+            local BackPackInfo = UGCBackPackSystem.GetAllItemData(killerPawn)
+            for k, v in pairs(BackPackInfo) do
+                UGCBackPackSystem.DropItem(killerPawn, v.ItemID, v.Count, true)
+            end
+            
+            -- 给予新武器
+            local weapon = WeaponSystem.WeaponLevels[killerPawn.CurrentWeaponLevel]
+            if weapon then
+                UGCBackPackSystem.AddItem(killerPawn, weapon.WeaponID, 1)
+                UGCBackPackSystem.AddItem(killerPawn, 105001, 180) -- 添加子弹
+                
+                -- 发送UI通知
+                if killerController then
+                    UnrealNetwork.CallUnrealRPC(killerController, killerController, "ClientRPC_ShowWeaponUpgradeMsg", weapon.Name)
+                end
+                
+                ugcprint("[Debug] 升级武器成功: " .. weapon.Name)
+            end
+            
+            -- 检查游戏结束
+            if killerPawn.CurrentWeaponLevel >= #WeaponSystem.WeaponLevels then
+                ugcprint("[Debug] 玩家" .. killerKey .. "完成所有武器升级！")
+                local gameMode = UGCGameSystem.GameMode
+                if gameMode then
+                    gameMode:NotifyGameEnd()
+                end
+            end
+        end
+    end
+    
+    -- 复活玩家 - 只使用PlayerRespawnComponent
+    ugcprint("[Debug] 准备复活玩家: " .. playerKey)
+    
+    local playerRespawnComponentClass = ScriptGameplayStatics.FindClass("PlayerRespawnComponent")
+    if playerRespawnComponentClass then
+        local gameMode = UGCGameSystem.GameMode
+        if gameMode then
+            local playerRespawnComponent = gameMode:GetComponentByClass(playerRespawnComponentClass)
+            if playerRespawnComponent then
+                ugcprint("[Debug] 使用PlayerRespawnComponent复活")
+                playerRespawnComponent:AddRespawnPlayerWithTime(playerKey, 1.0)
+            end
+        end
+    end
+end
+
+-- 死亡处理
+function UGCPlayerPawn:OnDeath(Killer, Damager, DamageEvent, HitPoint, HitDirection)
+    ugcprint("[UGCPlayerPawn] OnDeath被调用")
+    
+    -- 在处理死亡前先标记武器为未初始化，这样复活后才能重新装备
+    self.bInitializedWeapon = false
+    
+    -- 调用父类方法
+    if self.SuperClass and self.SuperClass.OnDeath then
+        self.SuperClass.OnDeath(self, Killer, Damager, DamageEvent, HitPoint, HitDirection)
+    end
+    
+    -- 调用我们自己的处理函数
+    self:UGC_PlayerDeadEvent(Killer, DamageEvent and DamageEvent.DamageType)
+end
+
+function UGCPlayerPawn:OnHealthChanged(NewHealth, OldHealth, Instigator)
+    if self:HasAuthority() == false and NewHealth < OldHealth then
+        TryExecuteCallerFunction(UIManager:GetUIByType(UIManager.HitUIID), "ShowRingDamageHit", NewHealth, OldHealth)
+    end
+end
+
+-- 死亡不掉落盒子
+function UGCPlayerPawn:IsSkipSpawnDeadTombBox(EventInstigater)
+    return true
+end
+
+return UGCPlayerPawn;
