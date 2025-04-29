@@ -1,9 +1,8 @@
----@class BUFF_LevelUp_C:PersistEffectBuff
----@field EnableHealth float
----@field RestoreMaxHealthPercentage float
---Edit Below--
 local BUFF_LevelUp = {}
  
+
+
+
 -- buff启动条件
 --[[
 function BUFF_LevelUp:CanApply_BP(OwnerActor)
