@@ -2,74 +2,151 @@
 --Edit Below--
 local UGCPlayerPawn = 
 {
-    GrounpID                  = 0,                         -- 队伍ID，服务端与客户端的交互，由PlayerState实现，编辑器设置不再起作用 PlayerState
-    PlayerIndex               = 0,                         -- 玩家序列号 0 1 2 3
-    GoldCoin                  = 0,                         -- 金币
-    CusBloodColor             = 0,                         -- 自定义飘血，0屏蔽，1开启，2使用默认
-    DropItemTable           = {},                         -- 从空投箱获取倒地护具及道具，下回合用新的
-    CurrentWeaponLevel        = 1,                         -- 当前武器等级
-    bInitializedWeapon        = false                      -- 是否已初始化武器
+    GrounpID = 0,            -- 队伍ID
+    PlayerIndex = 0,         -- 玩家序列号
+    GoldCoin = 0,            -- 金币
+    CusBloodColor = 0,       -- 自定义飘血
+    DropItemTable = {},      -- 道具表
+    CurrentWeaponLevel = 1,  -- 当前武器等级
+    bInitializedWeapon = false -- 是否已初始化武器
 };
 
--- 全局武器系统，确保数据一致性
+-- 武器升级系统全局配置
 if not _G.GunGameWeaponSystem then
     _G.GunGameWeaponSystem = {
+        -- 游戏配置
+        RespawnTime = 1.0,          -- 玩家复活时间(秒)
+        EnableInfiniteAmmo = true,  -- 无限弹药开关
+        
+        
+        -- 玩家数据
+        PlayerLevels = {},          -- 记录玩家等级，key是playerKey
+        
+        -- 武器等级列表 - 从简单到困难排序
         WeaponLevels = {
             { 
                 WeaponID = 101001, 
                 Name = "AKM突击步枪",
-                AmmoID = 102001,
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
             },
             { 
                 WeaponID = 101002, 
                 Name = "M16A4突击步枪",
+                Attachments = {
+                    203002,  -- 全息瞄准镜
+                }
             },
             { 
                 WeaponID = 101003, 
                 Name = "SCAR-L突击步枪",
+                Attachments = {
+                    203002,  -- 全息瞄准镜
+                }
             },
             { 
                 WeaponID = 101004, 
                 Name = "M416突击步枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                    202001   -- 直角前握把
+                }
             },
             { 
                 WeaponID = 101005, 
                 Name = "GROZA突击步枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 101006, 
+                Name = "AUG A3突击步枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 101007, 
+                Name = "QBZ95突击步枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 101008, 
+                Name = "FAMAS突击步枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 101009, 
+                Name = "M249轻机枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 101010, 
+                Name = "DP-28轻机枪",
+                Attachments = {
+                    203001,  -- 红点瞄准镜
+                }
+            },
+            { 
+                WeaponID = 103001, 
+                Name = "Kar98K狙击枪",
+                Attachments = {
+                    203004,  -- 4倍 瞄准镜
+                }
+            },
+            { 
+                WeaponID = 104001, 
+                Name = "双管猎枪",
+            },
+            { 
+                WeaponID = 106001, 
+                Name = "普通手枪",
+            },
+            { 
+                WeaponID = 107008, 
+                Name = "燃点复合弓",
             }
-        },
-        PlayerLevels = {},  -- 记录玩家等级，key是playerKey
-        EnableInfiniteAmmo = true  -- 添加无限弹药开关
+        }
     }
 end
 
 -- 使用全局变量
 local WeaponSystem = _G.GunGameWeaponSystem
 
--- 修改武器初始化部分
-local function EnableInfiniteAmmo(weapon)
-    if not weapon then return end
+-- 武器初始化函数
+local function InitializeWeapon(weapon, weaponConfig)
+    -- 确保只在服务端执行
+    if not weapon or not weapon:HasAuthority() then return end
     
-    -- 尝试不同的API名称
-    if weapon.EnableInfiniteClip then
-        weapon:EnableInfiniteClip(true)
-        ugcprint("[Debug] 使用EnableInfiniteClip成功启用无限弹药")
-    elseif weapon.SetInfiniteAmmo then
-        weapon:SetInfiniteAmmo(true)
-        ugcprint("[Debug] 使用SetInfiniteAmmo成功启用无限弹药")
-    elseif weapon.EnableInfiniteAmmo then
-        weapon:EnableInfiniteAmmo(true)
-        ugcprint("[Debug] 使用EnableInfiniteAmmo成功启用无限弹药")
-    else
-        ugcprint("[Error] 未找到支持的无限弹药方法")
-        -- 打印武器所有可用方法,帮助调试
-        for k,v in pairs(weapon) do
-            if type(v) == "function" then
-                ugcprint("[Debug] 可用方法: " .. k)
+    -- 获取物品所有者
+    local owner = weapon:GetOwner()
+    if not owner then return end
+    
+    -- 启用无限弹夹
+    if UGCGunSystem then
+        UGCGunSystem.EnableClipInfiniteBullets(weapon, true)
+        ugcprint("[Debug] 武器启用无限弹夹: " .. weaponConfig.WeaponID)
+        
+        -- 添加配件
+        if weaponConfig.Attachments then
+            for _, attachmentID in ipairs(weaponConfig.Attachments) do
+                -- 先添加配件到背包再装配
+                UGCBackPackSystem.AddItem(owner, attachmentID, 1)
+                UGCGunSystem.CreateAndAddGunAttachment(weapon, attachmentID)
             end
         end
     end
 end
 
+-- 获取需要复制的属性
 function UGCPlayerPawn:GetReplicatedProperties()
     return
     "GrounpID",
@@ -81,6 +158,7 @@ function UGCPlayerPawn:GetReplicatedProperties()
     "bInitializedWeapon"
 end
 
+-- 游戏开始时调用
 function UGCPlayerPawn:ReceiveBeginPlay()
     ugcprint("[UGCPlayerPawn] ReceiveBeginPlay")
     self.SuperClass.ReceiveBeginPlay(self)
@@ -124,25 +202,21 @@ function UGCPlayerPawn:ReceiveBeginPlay()
                 ugcprint("[Debug] 给予武器: " .. weapon.Name .. " (ID: " .. weapon.WeaponID .. ")")
                 UGCBackPackSystem.AddItem(self, weapon.WeaponID, 1)
                 
-                -- 调整延迟时间,并添加更多调试信息
+                -- 延迟初始化武器属性
                 local weaponDelegate = ObjectExtend.CreateDelegate(self, function()
                     local currentWeapon = self:GetCurrentWeapon()
                     if currentWeapon then
-                        ugcprint("[Debug] 获取到武器实例,准备启用无限弹药")
-                        EnableInfiniteAmmo(currentWeapon)
+                        ugcprint("[Debug] 获取到武器实例,准备初始化")
+                        InitializeWeapon(currentWeapon, weapon)
                         ObjectExtend.DestroyDelegate(weaponDelegate)
-                    else
-                        ugcprint("[Debug] 未获取到武器实例")
                     end
                 end)
                 
-                -- 增加延迟时间到0.5秒,确保武器完全初始化
                 KismetSystemLibrary.K2_SetTimerDelegateForLua(weaponDelegate, self, 0.5, false)
             end
             
             -- 标记为已初始化
             self.bInitializedWeapon = true
-            
             ObjectExtend.DestroyDelegate(initDelegate)
         end)
         
@@ -201,17 +275,16 @@ function UGCPlayerPawn:UGC_PlayerDeadEvent(Killer, DamageType)
             if weapon then
                 UGCBackPackSystem.AddItem(killerPawn, weapon.WeaponID, 1)
                 
-                -- 等待一帧确保武器已经添加到玩家身上
                 local weaponDelegate = ObjectExtend.CreateDelegate(killerPawn, function()
                     local currentWeapon = killerPawn:GetCurrentWeapon()
                     if currentWeapon then
-                        ugcprint("[Debug] 升级后获取到新武器,准备启用无限弹药")
-                        EnableInfiniteAmmo(currentWeapon)
+                        ugcprint("[Debug] 升级后获取到新武器,准备初始化")
+                        InitializeWeapon(currentWeapon, weapon)
                         ObjectExtend.DestroyDelegate(weaponDelegate)
                     end
                 end)
                 
-                KismetSystemLibrary.K2_SetTimerDelegateForLua(weaponDelegate, killerPawn, 0.1, false)
+                KismetSystemLibrary.K2_SetTimerDelegateForLua(weaponDelegate, killerPawn, 0.5, false)
                 
                 -- 发送UI通知
                 if killerController then
@@ -232,7 +305,7 @@ function UGCPlayerPawn:UGC_PlayerDeadEvent(Killer, DamageType)
         end
     end
     
-    -- 复活玩家 - 只使用PlayerRespawnComponent
+    -- 复活玩家
     ugcprint("[Debug] 准备复活玩家: " .. playerKey)
     
     local playerRespawnComponentClass = ScriptGameplayStatics.FindClass("PlayerRespawnComponent")
@@ -252,7 +325,7 @@ end
 function UGCPlayerPawn:OnDeath(Killer, Damager, DamageEvent, HitPoint, HitDirection)
     ugcprint("[UGCPlayerPawn] OnDeath被调用")
     
-    -- 在处理死亡前先标记武器为未初始化，这样复活后才能重新装备
+    -- 标记武器为未初始化，这样复活后才能重新装备
     self.bInitializedWeapon = false
     
     -- 调用父类方法
@@ -260,10 +333,11 @@ function UGCPlayerPawn:OnDeath(Killer, Damager, DamageEvent, HitPoint, HitDirect
         self.SuperClass.OnDeath(self, Killer, Damager, DamageEvent, HitPoint, HitDirection)
     end
     
-    -- 调用我们自己的处理函数
+    -- 调用自定义处理函数
     self:UGC_PlayerDeadEvent(Killer, DamageEvent and DamageEvent.DamageType)
 end
 
+-- 血量变化处理
 function UGCPlayerPawn:OnHealthChanged(NewHealth, OldHealth, Instigator)
     if self:HasAuthority() == false and NewHealth < OldHealth then
         TryExecuteCallerFunction(UIManager:GetUIByType(UIManager.HitUIID), "ShowRingDamageHit", NewHealth, OldHealth)
