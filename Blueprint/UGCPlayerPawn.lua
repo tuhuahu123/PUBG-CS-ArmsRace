@@ -18,6 +18,7 @@ if not _G.GunGameWeaponSystem then
             { 
                 WeaponID = 101001, 
                 Name = "AKM突击步枪",
+                AmmoID = 102001,
             },
             { 
                 WeaponID = 101002, 
@@ -36,12 +37,38 @@ if not _G.GunGameWeaponSystem then
                 Name = "GROZA突击步枪",
             }
         },
-        PlayerLevels = {}  -- 记录玩家等级，key是playerKey
+        PlayerLevels = {},  -- 记录玩家等级，key是playerKey
+        EnableInfiniteAmmo = true  -- 添加无限弹药开关
     }
 end
 
 -- 使用全局变量
 local WeaponSystem = _G.GunGameWeaponSystem
+
+-- 修改武器初始化部分
+local function EnableInfiniteAmmo(weapon)
+    if not weapon then return end
+    
+    -- 尝试不同的API名称
+    if weapon.EnableInfiniteClip then
+        weapon:EnableInfiniteClip(true)
+        ugcprint("[Debug] 使用EnableInfiniteClip成功启用无限弹药")
+    elseif weapon.SetInfiniteAmmo then
+        weapon:SetInfiniteAmmo(true)
+        ugcprint("[Debug] 使用SetInfiniteAmmo成功启用无限弹药")
+    elseif weapon.EnableInfiniteAmmo then
+        weapon:EnableInfiniteAmmo(true)
+        ugcprint("[Debug] 使用EnableInfiniteAmmo成功启用无限弹药")
+    else
+        ugcprint("[Error] 未找到支持的无限弹药方法")
+        -- 打印武器所有可用方法,帮助调试
+        for k,v in pairs(weapon) do
+            if type(v) == "function" then
+                ugcprint("[Debug] 可用方法: " .. k)
+            end
+        end
+    end
+end
 
 function UGCPlayerPawn:GetReplicatedProperties()
     return
@@ -96,7 +123,21 @@ function UGCPlayerPawn:ReceiveBeginPlay()
             if weapon then
                 ugcprint("[Debug] 给予武器: " .. weapon.Name .. " (ID: " .. weapon.WeaponID .. ")")
                 UGCBackPackSystem.AddItem(self, weapon.WeaponID, 1)
-                UGCBackPackSystem.AddItem(self, 105001, 180) -- 添加子弹
+                
+                -- 调整延迟时间,并添加更多调试信息
+                local weaponDelegate = ObjectExtend.CreateDelegate(self, function()
+                    local currentWeapon = self:GetCurrentWeapon()
+                    if currentWeapon then
+                        ugcprint("[Debug] 获取到武器实例,准备启用无限弹药")
+                        EnableInfiniteAmmo(currentWeapon)
+                        ObjectExtend.DestroyDelegate(weaponDelegate)
+                    else
+                        ugcprint("[Debug] 未获取到武器实例")
+                    end
+                end)
+                
+                -- 增加延迟时间到0.5秒,确保武器完全初始化
+                KismetSystemLibrary.K2_SetTimerDelegateForLua(weaponDelegate, self, 0.5, false)
             end
             
             -- 标记为已初始化
@@ -159,7 +200,18 @@ function UGCPlayerPawn:UGC_PlayerDeadEvent(Killer, DamageType)
             local weapon = WeaponSystem.WeaponLevels[killerPawn.CurrentWeaponLevel]
             if weapon then
                 UGCBackPackSystem.AddItem(killerPawn, weapon.WeaponID, 1)
-                UGCBackPackSystem.AddItem(killerPawn, 105001, 180) -- 添加子弹
+                
+                -- 等待一帧确保武器已经添加到玩家身上
+                local weaponDelegate = ObjectExtend.CreateDelegate(killerPawn, function()
+                    local currentWeapon = killerPawn:GetCurrentWeapon()
+                    if currentWeapon then
+                        ugcprint("[Debug] 升级后获取到新武器,准备启用无限弹药")
+                        EnableInfiniteAmmo(currentWeapon)
+                        ObjectExtend.DestroyDelegate(weaponDelegate)
+                    end
+                end)
+                
+                KismetSystemLibrary.K2_SetTimerDelegateForLua(weaponDelegate, killerPawn, 0.1, false)
                 
                 -- 发送UI通知
                 if killerController then
