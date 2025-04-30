@@ -1,4 +1,4 @@
-ddd---@class BUFF_Speed_C:PersistEffectBuff
+---@class BUFF_Speed_C:PersistEffectBuff
 ---@field MoveSpeed float
 --Edit Below--
 local BUFF_Speed = {}
