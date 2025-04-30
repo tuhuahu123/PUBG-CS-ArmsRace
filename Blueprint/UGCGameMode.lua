@@ -27,6 +27,8 @@ function UGCGameMode:HandlePlayerDeath(deadPlayerKey, killerPlayerKey)
 end
 
 
+
+
 function UGCGameMode:ReceiveBeginPlay()
     self.SuperClass.ReceiveBeginPlay(self)
     

@@ -1,3 +1,7 @@
+---@class BUFF_LevelUp_C:PersistEffectBuff
+---@field EnableHealth float
+---@field RestoreMaxHealthPercentage float
+--Edit Below--
 local BUFF_LevelUp = {}
  
 
