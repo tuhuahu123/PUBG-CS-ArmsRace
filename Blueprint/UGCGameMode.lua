@@ -1,70 +1,50 @@
----@class UGCGameMode_C:BP_UGCGameBase_C
---Edit Below--
-local UGCGameMode = {}; 
+ugcprint("!!!!!!!!!!!!!!!!!!!! UGCGameMode.lua IS BEING LOADED !!!!!!!!!!!!!!!!!!!!")
 
---死亡玩家的Key和击杀者的Key--
-function UGCGameMode:HandlePlayerDeath(deadPlayerKey, killerPlayerKey)    
-    ugcprint("[UGCGameMode] HandlePlayerDeath: deadPlayerKey=" .. tostring(deadPlayerKey))
+-- 引入游戏管理器，所有游戏逻辑都在管理器中实现
+local GameManager = require('Script.Common.GameManager')
+
+local UGCGameMode = {}
+
+-- 游戏模式初始化，仅调用GameManager
+function UGCGameMode:BeginPlay()
+    -- 确保GameManager已初始化
+    if not GameManager.IsInitialized then
+        GameManager:Initialize()
+    end
     
-    -- 设置复活时间为1秒
-    local respawnTime = 1.0
-    
-    -- 创建延迟执行复活的委托
-    local respawnTimerDelegate = ObjectExtend.CreateDelegate(self, function()
-        ugcprint("[UGCGameMode] 开始复活玩家: " .. tostring(deadPlayerKey))
-        
-        -- 使用UGCGameSystem复活
-        local respawnSuccess = UGCGameSystem.RespawnPlayer(deadPlayerKey)
-        ugcprint("[UGCGameMode] 复活尝试结果: " .. tostring(respawnSuccess))
-        
-        -- 销毁委托
-        ObjectExtend.DestroyDelegate(respawnTimerDelegate)
-    end)
-    
-    -- 设置复活计时器
-    ugcprint("[UGCGameMode] 设置复活计时器，延迟: " .. tostring(respawnTime) .. "秒")
-    KismetSystemLibrary.K2_SetTimerDelegateForLua(respawnTimerDelegate, self, respawnTime, false)
-end
-
-
-
-
-function UGCGameMode:ReceiveBeginPlay()
-    self.SuperClass.ReceiveBeginPlay(self)
-    
+    -- 只在服务器上启动游戏阶段
     if UGCGameSystem.IsServer() then
-        -- 获取复活组件并进行设置
-        local RespawnComponent = UGCGameSystem.GetRespawnComponent()
-        if RespawnComponent then
-            -- 设置复活和无敌时间都为1秒
-            RespawnComponent:SetRespawnTime(1.0, 1.0)
-            ugcprint("设置复活时间为1秒，无敌时间为1秒")
-            
-            -- 确保启用随机重生
-            RespawnComponent.bIsEnableRespawn = true
-            RespawnComponent.bIsRespawnGenerateInitialItems = true
-            RespawnComponent.bIsRespawnKeepSuitSkinConfig = true
-            
-            ugcprint("复活组件初始化完成")
-        else
-            ugcprint("错误: 无法获取复活组件!")
-        end
+        GameManager:StartPhase("Preparation")
     end
 end
 
+-- 以下方法只是简单地转发到GameManager，保持API兼容性
 
+function UGCGameMode:StartPhase(phaseKey)
+    return GameManager:StartPhase(phaseKey)
+end
 
+function UGCGameMode:GetCurrentPhaseInfo()
+    return GameManager:GetCurrentPhaseInfo()
+end
 
+function UGCGameMode:NotifyGameEnd(winnerID, winnerTeam)
+    return GameManager:NotifyGameEnd(winnerID, winnerTeam)
+end
 
+function UGCGameMode:ResetAllPlayerWeaponLevels()
+    return GameManager:ResetAllPlayerWeaponLevels()
+end
 
+-- 服务器RPC处理
+function UGCGameMode:ServerRPC_RequestPhaseInfo(controller)
+    return GameManager:HandleClientRequestPhaseInfo(controller)
+end
 
--- function UGCGameMode:ReceiveBeginPlay()
+-- 导出可调用的服务器RPC
+function UGCGameMode:GetAvailableServerRPCs()
+    return
+    "ServerRPC_RequestPhaseInfo"
+end
 
--- end
--- function UGCGameMode:ReceiveTick(DeltaTime)
-
--- end
--- function UGCGameMode:ReceiveEndPlay()
- 
--- end
-return UGCGameMode;
+return UGCGameMode
